@@ -48,9 +48,9 @@ cd Script_Descarga
 ```
 
 ### Paso 3: Crear el entorno virtual (`.venv`)
-Se recomienda crear un entorno virtual aislado dentro del proyecto para no mezclar librerías con el resto del sistema:
+Se recomienda crear un entorno virtual limpio dentro del proyecto (`--clear` elimina cualquier `.venv` residual si copiaste la carpeta desde otra PC):
 ```powershell
-python -m venv .venv
+python -m venv --clear .venv
 ```
 *(Si Windows bloquea la activación de scripts en PowerShell, puedes habilitarla para tu usuario con: `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`).*
 
