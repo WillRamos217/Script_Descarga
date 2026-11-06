@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+sesion_navegador/
+descargas/
+reportes/
+*.pyc
+.env
