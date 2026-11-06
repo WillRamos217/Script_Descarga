@@ -77,8 +77,14 @@ def seleccionar_fecha_en_calendario(page: Page, indice_calendario: int, fecha_st
             if opcion_anio.count() > 0:
                 opcion_anio.first.click()
 
-    patron_boton_dia = re.compile(rf",\s*{nombre_mes}\s+{dia}º\b", re.IGNORECASE)
-    page.get_by_role("button", name=patron_boton_dia).click()
+    # Seleccionar el botón del día sin importar qué día de la semana sea (ej. "Seleccione domingo, enero 25º")
+    # Nota: En RegExp de JavaScript (Chromium), 'º' no es carácter de palabra (\w), por lo que no debe usarse \b tras 'º'.
+    patron_boton_dia = re.compile(rf"\b{nombre_mes}\s+{dia}º", re.IGNORECASE)
+    boton_dia = page.get_by_role("button", name=patron_boton_dia)
+    if boton_dia.count() > 0:
+        boton_dia.first.click()
+    else:
+        page.get_by_test_id("DatePicker-container").get_by_role("button", name=str(dia), exact=True).first.click()
     page.wait_for_timeout(1000)
 
 
