@@ -2,13 +2,28 @@ import argparse
 import csv
 import hashlib
 import io
+import sys
 import zipfile
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-import config
+# Permitir ejecución tanto desde main.py como directamente con python src/verifier.py
+if __name__ == "__main__" and __package__ is None:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from src import config
+
+ARCHIVOS_IGNORADOS_SISTEMA = {".gitkeep", "desktop.ini", "thumbs.db", ".ds_store"}
+
+
+def es_archivo_sistema_ignorado(ruta_archivo: Path) -> bool:
+    """Ignora archivos de control como .gitkeep o desktop.ini dentro de la carpeta de descargas."""
+    return (
+        ruta_archivo.name.lower() in ARCHIVOS_IGNORADOS_SISTEMA
+        or ruta_archivo.name.startswith(".test_permisos_")
+    )
 
 
 def calcular_sha256(ruta_archivo: Path) -> str:
@@ -161,13 +176,16 @@ def diagnosticar_estado_previo_carpeta(
         ) from e
 
     archivos_existentes = sorted(
-        [p for p in directorio_descargas.iterdir() if p.is_file()],
+        [
+            p
+            for p in directorio_descargas.iterdir()
+            if p.is_file() and not es_archivo_sistema_ignorado(p)
+        ],
         key=lambda x: x.name.lower(),
     )
 
     archivos_incompletos_previos: List[str] = []
     paquetes_previos: Set[str] = set()
-    # Huella de cada documento interno ya existente: (nombre_lower, tamano_bytes, crc)
     documentos_internos_previos: Dict[Tuple[str, int, int], str] = {}
 
     for archivo in archivos_existentes:
@@ -305,7 +323,6 @@ def verificar_y_analizar_descarga(
                     else:
                         resultado["internos_vacios"] += 1
 
-                    # Verificar si este documento ya había sido descargado antes
                     huella = (nombre_interno.lower(), tamano_interno, info.CRC)
                     origen_previo = ""
                     if historial_documentos is not None:
@@ -332,7 +349,7 @@ def verificar_y_analizar_descarga(
                     )
 
                 resultado["duplicados_mismo_nombre_en_zip"] = [
-                     f"{nom} (x{cant})" for nom, cant in conteo_nombres_internos.items() if cant > 1
+                    f"{nom} (x{cant})" for nom, cant in conteo_nombres_internos.items() if cant > 1
                 ]
 
         except zipfile.BadZipFile:
@@ -402,7 +419,6 @@ def verificar_y_analizar_descarga(
             tipo_unico = next(iter(resultado["conteo_tipos"].keys()), "Documento")
             print(f"   📊 Tipo de documento      : {tipo_unico}")
 
-        # Alertas específicas si parte o todos los documentos ya se habían descargado antes
         cant_dup = len(resultado["duplicados_previos"])
         total_int = resultado["total_archivos_internos"]
         if cant_dup > 0:
@@ -424,9 +440,7 @@ def verificar_y_analizar_descarga(
 
         if resultado["duplicados_mismo_nombre_en_zip"]:
             muestra_nom = ", ".join(resultado["duplicados_mismo_nombre_en_zip"][:3])
-            print(
-                f"   ℹ️  Nombres repetidos dentro del mismo ZIP: {muestra_nom}"
-            )
+            print(f"   ℹ️  Nombres repetidos dentro del mismo ZIP: {muestra_nom}")
 
         print("   " + "-" * 68)
 
@@ -446,7 +460,11 @@ def auditar_carpeta_descargas(
     config.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
     archivos_en_disco = sorted(
-        [p for p in directorio_descargas.iterdir() if p.is_file()],
+        [
+            p
+            for p in directorio_descargas.iterdir()
+            if p.is_file() and not es_archivo_sistema_ignorado(p)
+        ],
         key=lambda x: x.stat().st_mtime,
     )
 
@@ -506,7 +524,6 @@ def auditar_carpeta_descargas(
             }
         )
 
-    # 1. Guardar CSV de los archivos ZIP descargados
     columnas_zips = [
         "indice",
         "nombre_archivo_descargado",
@@ -524,7 +541,6 @@ def auditar_carpeta_descargas(
         writer.writeheader()
         writer.writerows(filas_csv_zips)
 
-    # 2. Guardar CSV con el detalle de cada documento individual dentro de los ZIPs
     columnas_internos = [
         "archivo_zip",
         "pagina",
@@ -539,7 +555,6 @@ def auditar_carpeta_descargas(
         writer.writeheader()
         writer.writerows(filas_csv_detalle_internos)
 
-    # 3. Construir y guardar el informe resumen en texto y mostrarlo en pantalla
     mb_totales = bytes_totales_disco / (1024 * 1024)
     documentos_unicos = max(0, total_documentos_en_zips - total_documentos_duplicados)
     lineas_informe = [

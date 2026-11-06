@@ -1,7 +1,15 @@
+# Entorno virtual y caché de Python
 .venv/
 __pycache__/
-sesion_navegador/
-descargas/
-reportes/
 *.pyc
+sesion_navegador/
+
+# Archivo de configuración privada con credenciales
 .env
+
+# Ignorar los archivos descargados y reportes generados localmente,
+# pero conservar las carpetas descargas/ y reportes/ en GitHub mediante .gitkeep
+descargas/*
+!descargas/.gitkeep
+reportes/*
+!reportes/.gitkeep

@@ -9,8 +9,8 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-# Directorios del proyecto
-BASE_DIR = Path(__file__).resolve().parent
+# Directorio raíz del proyecto (un nivel arriba de src/)
+BASE_DIR = Path(__file__).resolve().parent.parent
 ENV_FILE = BASE_DIR / ".env"
 
 
@@ -74,6 +74,15 @@ APPIAN_URL = APPIAN_FOLDER_URL
 
 # Carpeta donde se guardarán las descargas (configurable desde DOWNLOAD_DIR en .env)
 DOWNLOAD_DIR = _resolver_directorio_descargas()
+
+# Opción para eliminar los documentos de Appian tras comprobar su descarga correcta
+DELETE_AFTER_DOWNLOAD = os.getenv("DELETE_AFTER_DOWNLOAD", "false").strip().lower() in {
+    "true",
+    "1",
+    "si",
+    "sí",
+    "yes",
+}
 
 # ==============================================================================
 # 2. FILTROS DE LA TABLA DE APPIAN DESIGNER DESDE EL ARCHIVO .env

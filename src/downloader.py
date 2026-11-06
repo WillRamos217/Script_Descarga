@@ -1,8 +1,12 @@
 import re
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple
+
+if __name__ == "__main__" and __package__ is None:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from playwright.sync_api import (
     Error as PlaywrightError,
@@ -12,8 +16,8 @@ from playwright.sync_api import (
     sync_playwright,
 )
 
-import config
-from verificar_descargas import (
+from src import config
+from src.verifier import (
     auditar_carpeta_descargas,
     diagnosticar_estado_previo_carpeta,
     verificar_y_analizar_descarga,
@@ -59,15 +63,12 @@ def seleccionar_fecha_en_calendario(page: Page, indice_calendario: int, fecha_st
     dia, nombre_mes, anio = parsear_fecha_env(fecha_str, etiqueta)
     print(f"   📅 Filtro '{etiqueta}': seleccionando {dia:02d} de {nombre_mes} de {anio} ({fecha_str})...")
 
-    # Abrir el calendario correspondiente (0 = Desde, 1 = Hasta)
     page.get_by_test_id("DatePickerWidget-calendarButton").nth(indice_calendario).click()
 
-    # Seleccionar el mes en el desplegable del calendario
     carets = page.locator(".DatePicker---dropdown_caret")
     carets.first.click()
     page.get_by_test_id("DatePicker-container").get_by_text(nombre_mes, exact=True).click()
 
-    # Si el calendario tiene selector de año y el año deseado aparece en la lista, seleccionarlo
     if carets.count() > 1:
         texto_contenedor = page.get_by_test_id("DatePicker-container").inner_text()
         if str(anio) not in texto_contenedor:
@@ -76,7 +77,6 @@ def seleccionar_fecha_en_calendario(page: Page, indice_calendario: int, fecha_st
             if opcion_anio.count() > 0:
                 opcion_anio.first.click()
 
-    # Seleccionar el botón del día sin importar qué día de la semana sea (ej. "domingo, enero 25º")
     patron_boton_dia = re.compile(rf",\s*{nombre_mes}\s+{dia}º\b", re.IGNORECASE)
     page.get_by_role("button", name=patron_boton_dia).click()
     page.wait_for_timeout(1000)
@@ -107,7 +107,6 @@ def aplicar_filtros_appian(page: Page) -> None:
 
     print("\n🔍 Aplicando filtros configurados en .env...")
 
-    # 1. Filtro por "Nombre o descripción"
     if config.FILTER_SEARCH_TEXT:
         print(f"   🔤 Filtro 'Nombre o descripción': '{config.FILTER_SEARCH_TEXT}'")
         campo_busqueda = (
@@ -120,7 +119,6 @@ def aplicar_filtros_appian(page: Page) -> None:
         campo_busqueda.press("Enter")
         page.wait_for_timeout(1500)
 
-    # 2. Filtro por "TIPO DE OBJETO" (Documento, Carpeta de Documentos, Informe de Proceso)
     if config.FILTER_OBJECT_TYPES:
         for tipo_obj in config.FILTER_OBJECT_TYPES:
             print(f"   ☑️ Filtro 'TIPO DE OBJETO': marcando '{tipo_obj}'")
@@ -129,11 +127,9 @@ def aplicar_filtros_appian(page: Page) -> None:
                 if not checkbox_tipo.first.is_checked():
                     checkbox_tipo.first.check(force=True)
             else:
-                # Si Appian renderiza el checkbox con un label superpuesto, hacer clic en el texto exacto
                 page.get_by_text(tipo_obj, exact=True).first.click()
             page.wait_for_timeout(1200)
 
-    # 3. Filtro por "ÚLTIMA MODIFICACIÓN POR"
     if config.FILTER_MODIFIED_BY:
         campo_usuario = page.get_by_placeholder(re.compile("Seleccione uno o más usuar", re.I)).first
         for usuario in config.FILTER_MODIFIED_BY:
@@ -148,20 +144,16 @@ def aplicar_filtros_appian(page: Page) -> None:
                 campo_usuario.press("Enter")
             page.wait_for_timeout(1200)
 
-    # 4. Filtro de fecha "Desde"
     if config.FILTER_DATE_FROM:
         seleccionar_fecha_en_calendario(page, 0, config.FILTER_DATE_FROM, "Desde (FILTER_DATE_FROM)")
 
-    # 5. Filtro de fecha "Hasta"
     if config.FILTER_DATE_TO:
         seleccionar_fecha_en_calendario(page, 1, config.FILTER_DATE_TO, "Hasta (FILTER_DATE_TO)")
 
-    # Hacer clic en el encabezado de la tabla para cerrar cualquier selector abierto
     encabezado_tabla = page.get_by_role("row", name="Nombre Descripción Tipo Tamañ").get_by_role("cell")
     if encabezado_tabla.count() > 0:
         encabezado_tabla.first.click()
 
-    # Esperar a que Appian termine de refrescar la tabla tras aplicar los filtros
     print("⏳ Esperando a que Appian actualice la tabla con los filtros aplicados...")
     page.wait_for_timeout(3500)
     try:
@@ -205,7 +197,6 @@ def guardar_descarga_segura(download, ruta_preferida: Path, pagina: int) -> tupl
     """
     Guarda el archivo descargado en la ruta configurada en .env.
     Detecta si el archivo ya existía previamente o si no se puede sobrescribir por estar bloqueado/duplicado.
-    Retorna: (ruta_final_guardada, ya_existia_antes, mensaje_aviso)
     """
     ya_existia = ruta_preferida.exists() and ruta_preferida.stat().st_size > 0
     mensaje_aviso = ""
@@ -235,6 +226,60 @@ def guardar_descarga_segura(download, ruta_preferida: Path, pagina: int) -> tupl
         ) from e
 
 
+def eliminar_documentos_seleccionados_appian(page: Page, pagina: int) -> None:
+    """
+    Elimina de la carpeta de Appian los documentos seleccionados en la página actual:
+      1. Verifica que las filas sigan marcadas.
+      2. Presiona el botón 'ELIMINAR' de la barra de herramientas superior.
+      3. En la ventana emergente ('¿Eliminar X documentos?'), marca la casilla
+         'Entiendo que esta acción no se puede deshacer'.
+      4. Presiona el botón 'ELIMINAR' del cuadro de confirmación y espera a que la tabla se actualice.
+    """
+    print(f"   🗑️  [Página {pagina}] Eliminando de Appian los documentos ya descargados y comprobados...")
+
+    selector_label = page.locator(
+        '[id="53d75f33ea0598fc72884b78409780bd_headerCell_selection__0-label"], '
+        '[id$="_headerCell_selection__0-label"]'
+    ).first
+    checkbox_todos = page.get_by_role("checkbox", name="Seleccionar todas las filas")
+
+    if not checkbox_todos.is_checked():
+        selector_label.click()
+        checkbox_todos.check()
+        page.wait_for_timeout(500)
+
+    boton_eliminar_barra = page.get_by_role("button", name="Eliminar").first
+    boton_eliminar_barra.click()
+    page.wait_for_timeout(1000)
+
+    casilla_confirmar = page.get_by_role(
+        "checkbox", name="Entiendo que esta acción no se puede deshacer"
+    )
+    texto_confirmar = page.get_by_text("Entiendo que esta acción no se puede deshacer", exact=True)
+
+    if casilla_confirmar.count() > 0:
+        try:
+            casilla_confirmar.first.check(force=True)
+        except Exception:
+            pass
+
+    if casilla_confirmar.count() == 0 or not casilla_confirmar.first.is_checked():
+        texto_confirmar.first.click()
+
+    page.wait_for_timeout(600)
+
+    boton_eliminar_modal = page.get_by_role("button", name="Eliminar").last
+    boton_eliminar_modal.click()
+
+    page.wait_for_timeout(3500)
+    try:
+        page.wait_for_load_state("networkidle", timeout=5000)
+    except Exception:
+        pass
+
+    print(f"   ✅ [Página {pagina}] Documentos eliminados correctamente de la carpeta de Appian.")
+
+
 def run(playwright: Playwright) -> None:
     config.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -250,13 +295,35 @@ def run(playwright: Playwright) -> None:
     print(f"👤 Usuario configurado       : {config.APPIAN_USERNAME}")
     print(f"🔗 Carpeta destino URL       : {config.APPIAN_FOLDER_URL}")
     print(f"📂 Carpeta local de descarga : {config.DOWNLOAD_DIR}")
+    print(
+        f"🗑️  Eliminar tras descargar   : "
+        f"{'SÍ (ACTIVO)' if config.DELETE_AFTER_DOWNLOAD else 'NO (DESACTIVADO)'}"
+    )
     print(f"🔎 Filtro texto              : {config.FILTER_SEARCH_TEXT or '(ninguno)'}")
     print(f"☑️ Filtro tipo de objeto     : {', '.join(config.FILTER_OBJECT_TYPES) or '(ninguno)'}")
     print(f"👥 Filtro modificado por     : {', '.join(config.FILTER_MODIFIED_BY) or '(ninguno)'}")
     print(f"📅 Filtro fecha Desde / Hasta: {config.FILTER_DATE_FROM or '-'} -> {config.FILTER_DATE_TO or '-'}")
     print("=" * 74)
 
-    # Diagnosticar estado previo de la carpeta (permisos, descargas parciales previas y duplicados)
+    if config.DELETE_AFTER_DOWNLOAD:
+        print("\n" + "!" * 74)
+        print("⚠️  ADVERTENCIA DE SEGURIDAD: ELIMINACIÓN EN APPIAN ACTIVADA")
+        print("!" * 74)
+        print("La opción DELETE_AFTER_DOWNLOAD=true está activa en tu archivo .env.")
+        print("Esto significa que DESPUÉS de descargar y comprobar cada página,")
+        print("los archivos descargados SERÁN ELIMINADOS PERMANENTEMENTE de la carpeta en Appian:")
+        print(f"   🔗 {config.APPIAN_FOLDER_URL}")
+        print("!" * 74)
+        confirmacion = input(
+            "\n👉 ¿Estás de acuerdo en eliminar los archivos de Appian tras descargarlos?\n"
+            "   Escribe 'Y' y presiona [ENTER] para continuar (cualquier otra tecla cancela): "
+        ).strip()
+
+        if confirmacion.upper() != "Y":
+            print("\n🛑 Ejecución cancelada por el usuario. No se realizó ninguna descarga ni eliminación.")
+            return
+        print("\n✅ Confirmación recibida ('Y'). Iniciando proceso con eliminación posterior...")
+
     estado_previo = diagnosticar_estado_previo_carpeta(config.DOWNLOAD_DIR)
     historial_documentos = estado_previo["documentos_internos_previos"]
     errores_ejecucion: List[str] = []
@@ -267,7 +334,6 @@ def run(playwright: Playwright) -> None:
     page.set_default_timeout(config.PAGE_NAVIGATION_TIMEOUT_MS)
 
     try:
-        # 1. Ir al enlace de la carpeta configurado en .env e iniciar sesión
         print("\n🌐 Conectando con Appian e iniciando sesión...")
         page.goto(config.APPIAN_FOLDER_URL, timeout=config.PAGE_NAVIGATION_TIMEOUT_MS)
         page.get_by_role("link", name="No").click()
@@ -276,7 +342,6 @@ def run(playwright: Playwright) -> None:
         page.get_by_role("textbox", name="Contraseña").fill(config.APPIAN_PASSWORD)
         page.get_by_role("button", name="Iniciar sesión").click()
 
-        # 2. Aplicar todos los filtros configurados en el archivo .env
         aplicar_filtros_appian(page)
 
     except (PlaywrightTimeoutError, PlaywrightError, ValueError) as e:
@@ -289,7 +354,6 @@ def run(playwright: Playwright) -> None:
         browser.close()
         return
 
-    # 3. Bucle de descarga página por página + comprobación inmediata del ZIP
     pagina = 1
     while True:
         print(f"\n🔄 Procesando página {pagina}...")
@@ -297,7 +361,6 @@ def run(playwright: Playwright) -> None:
 
         for intento in range(1, config.MAX_RETRIES_PER_FILE + 1):
             try:
-                # Seleccionar todas las filas de la página actual y verificar que no se deseleccionen
                 selector_label = page.locator(
                     '[id="53d75f33ea0598fc72884b78409780bd_headerCell_selection__0-label"], '
                     '[id$="_headerCell_selection__0-label"]'
@@ -308,7 +371,6 @@ def run(playwright: Playwright) -> None:
                     selector_label.click()
                 checkbox_todos.check()
 
-                # Pausa breve para confirmar que un refresco tardío de Appian no desmarcó las casillas
                 page.wait_for_timeout(800)
                 if not checkbox_todos.is_checked():
                     print("   ℹ️ La tabla se refrescó; volviendo a marcar todas las filas...")
@@ -316,7 +378,6 @@ def run(playwright: Playwright) -> None:
                     checkbox_todos.check()
                     page.wait_for_timeout(500)
 
-                # Abrir el menú "Más" y hacer clic en la opción "Descargar"
                 page.get_by_role("button", name="Más").click()
                 with page.expect_download(timeout=config.DOWNLOAD_TIMEOUT_MS) as download_info:
                     opcion_descargar = (
@@ -328,14 +389,12 @@ def run(playwright: Playwright) -> None:
                     opcion_descargar.click()
                 download = download_info.value
 
-                # Verificar si la descarga reportó un fallo de red a mitad de camino
                 fallo_descarga = download.failure()
                 if fallo_descarga:
                     raise RuntimeError(
                         f"La descarga se interrumpió a mitad de camino por un error de red: {fallo_descarga}"
                     )
 
-                # Guardar el archivo en la carpeta configurada en .env
                 nombre_original = download.suggested_filename or f"descarga_pagina_{pagina}.zip"
                 ruta_preferida = config.DOWNLOAD_DIR / f"pagina_{pagina:03d}_{nombre_original}"
                 ruta_destino, ya_existia_paquete, aviso_guardado = guardar_descarga_segura(
@@ -346,7 +405,6 @@ def run(playwright: Playwright) -> None:
                     print(f"   {aviso_guardado}")
                     errores_ejecucion.append(f"Página {pagina}: {aviso_guardado}")
 
-                # Comprobación inmediata post-descarga (verifica ZIP, tipos y duplicados/descargas previas)
                 resultado_analisis = verificar_y_analizar_descarga(
                     ruta_archivo=ruta_destino,
                     numero_pagina=pagina,
@@ -355,9 +413,10 @@ def run(playwright: Playwright) -> None:
                     ya_existia_paquete_en_disco=ya_existia_paquete,
                 )
 
-                if not resultado_analisis["es_valido"]:
+                if not resultado_analisis["es_valido"] or resultado_analisis["internos_vacios"] > 0:
                     raise RuntimeError(
-                        f"El archivo descargado no pasó la verificación ({resultado_analisis['estado']})."
+                        f"El archivo descargado no pasó la verificación ({resultado_analisis['estado']}, "
+                        f"vacíos: {resultado_analisis['internos_vacios']})."
                     )
 
                 descarga_exitosa = True
@@ -381,7 +440,39 @@ def run(playwright: Playwright) -> None:
             )
             break
 
-        # Verificar si el botón "Página siguiente" sigue visible y habilitado
+        if config.DELETE_AFTER_DOWNLOAD:
+            primera_fila_antes = ""
+            try:
+                primera_fila_antes = page.locator("table tbody tr").first.inner_text(timeout=2000)
+            except Exception:
+                pass
+
+            try:
+                eliminar_documentos_seleccionados_appian(page, pagina)
+            except Exception as e:
+                msg_del = explicar_error_red_o_timeout(
+                    e, f"Eliminación de documentos en Appian (Página {pagina})"
+                )
+                print(f"\n   {msg_del}")
+                errores_ejecucion.append(msg_del)
+                break
+
+            checkbox_todos = page.get_by_role("checkbox", name="Seleccionar todas las filas")
+            filas_con_checkbox = page.locator("table tbody tr input[type='checkbox']")
+            if filas_con_checkbox.count() == 0 and not checkbox_todos.is_visible():
+                print("\n🏁 Ya no quedan más documentos en la carpeta de Appian. Proceso finalizado.")
+                break
+
+            primera_fila_despues = ""
+            try:
+                primera_fila_despues = page.locator("table tbody tr").first.inner_text(timeout=2000)
+            except Exception:
+                pass
+
+            if primera_fila_despues and primera_fila_despues != primera_fila_antes:
+                pagina += 1
+                continue
+
         boton_siguiente = page.get_by_role("button", name="Página siguiente")
         if (
             boton_siguiente.count() == 0
@@ -392,7 +483,6 @@ def run(playwright: Playwright) -> None:
             print("\n🏁 Ya no se ve (o está deshabilitado) el botón 'Página siguiente'. Proceso finalizado.")
             break
 
-        # Avanzar a la siguiente página con control de timeout
         try:
             boton_siguiente.click()
             page.wait_for_timeout(2000)
@@ -403,15 +493,17 @@ def run(playwright: Playwright) -> None:
             errores_ejecucion.append(msg_pag)
             break
 
-    # ---------------------
     context.close()
     browser.close()
 
-    # Generar el informe final consolidado de todos los ZIPs, tipos de documentos e incidencias
     auditar_carpeta_descargas(errores_ejecucion=errores_ejecucion)
 
 
-if __name__ == "__main__":
+def iniciar_descarga() -> None:
+    """Punto de entrada para ejecutar la automatización completa."""
     with sync_playwright() as playwright:
         run(playwright)
 
+
+if __name__ == "__main__":
+    iniciar_descarga()
