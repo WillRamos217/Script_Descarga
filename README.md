@@ -87,7 +87,7 @@ APPIAN_USERNAME=tu_usuario@dominio.com
 APPIAN_PASSWORD=tu_contraseña
 
 # Link directo a la carpeta de Appian Designer que deseas descargar
-APPIAN_FOLDER_URL=https://pgn-dev.appiancloud.com/suite/design/docFolder/j_wE_8A5lGI7_Uv1qEbNvkJRwKQ
+APPIAN_FOLDER_URL=link de la carpeta
 
 # ==============================================================================
 # 2. CARPETA LOCAL DE DESCARGA Y OPCIONES DE ELIMINACIÓN

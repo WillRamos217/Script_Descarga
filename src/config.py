@@ -66,10 +66,7 @@ def _parsear_lista_env(nombre_var: str) -> List[str]:
 # ==============================================================================
 APPIAN_USERNAME = os.getenv("APPIAN_USERNAME", "").strip()
 APPIAN_PASSWORD = os.getenv("APPIAN_PASSWORD", "").strip()
-APPIAN_FOLDER_URL = os.getenv(
-    "APPIAN_FOLDER_URL",
-    "https://pgn-dev.appiancloud.com/suite/design/docFolder/j_wE_8A5lGI7_Uv1qEbNvkJRwKQ",
-).strip()
+APPIAN_FOLDER_URL = os.getenv("APPIAN_FOLDER_URL", "").strip()
 APPIAN_URL = APPIAN_FOLDER_URL
 
 # Carpeta donde se guardarán las descargas (configurable desde DOWNLOAD_DIR en .env)
