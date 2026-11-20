@@ -342,11 +342,41 @@ def run(playwright: Playwright) -> None:
     try:
         print("\n🌐 Conectando con Appian e iniciando sesión...")
         page.goto(config.APPIAN_FOLDER_URL, timeout=config.PAGE_NAVIGATION_TIMEOUT_MS)
-        page.get_by_role("link", name="No").click()
-        page.get_by_role("textbox", name="Nombre de usuario").fill(config.APPIAN_USERNAME)
-        page.get_by_role("textbox", name="Contraseña").click()
-        page.get_by_role("textbox", name="Contraseña").fill(config.APPIAN_PASSWORD)
-        page.get_by_role("button", name="Iniciar sesión").click()
+
+        # Esperar a que cargue la pantalla de selección ("No") o directamente el formulario de usuario
+        campo_usuario = (
+            page.locator("input#un, input[name='un']")
+            .or_(page.get_by_role("textbox", name=re.compile("Nombre de usuario|Username|Usuario", re.I)))
+            .first
+        )
+        enlace_no = page.get_by_role("link", name="No").or_(page.get_by_role("button", name="No")).first
+
+        # Si aparece primero el enlace "No" (para saltar SSO y usar login nativo), hacer clic en él
+        try:
+            enlace_no.or_(campo_usuario).first.wait_for(state="visible", timeout=15000)
+            if enlace_no.is_visible() and not campo_usuario.is_visible():
+                enlace_no.click()
+        except Exception:
+            pass
+
+        # Rellenar usuario y contraseña (compatible con Español, Inglés e IDs nativos de Appian #un y #pw)
+        campo_usuario.wait_for(state="visible", timeout=20000)
+        campo_usuario.fill(config.APPIAN_USERNAME)
+
+        campo_password = (
+            page.locator("input#pw, input[name='pw'], input[type='password']")
+            .or_(page.get_by_role("textbox", name=re.compile("Contraseña|Password", re.I)))
+            .first
+        )
+        campo_password.click()
+        campo_password.fill(config.APPIAN_PASSWORD)
+
+        boton_login = (
+            page.locator("input[type='submit'], button[type='submit']")
+            .or_(page.get_by_role("button", name=re.compile("Iniciar sesión|Sign In|Log In|Entrar", re.I)))
+            .first
+        )
+        boton_login.click()
 
         aplicar_filtros_appian(page)
 
