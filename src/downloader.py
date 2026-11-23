@@ -67,7 +67,9 @@ def seleccionar_fecha_en_calendario(page: Page, indice_calendario: int, fecha_st
 
     carets = page.locator(".DatePicker---dropdown_caret")
     carets.first.click()
-    page.get_by_test_id("DatePicker-container").get_by_text(nombre_mes, exact=True).click()
+    # Usar .last porque si el mes buscado ya es el mes actual (ej. "noviembre"),
+    # aparece tanto en el botón superior del calendario como en la lista desplegable.
+    page.get_by_test_id("DatePicker-container").get_by_text(nombre_mes, exact=True).last.click()
 
     if carets.count() > 1:
         texto_contenedor = page.get_by_test_id("DatePicker-container").inner_text()
@@ -75,7 +77,7 @@ def seleccionar_fecha_en_calendario(page: Page, indice_calendario: int, fecha_st
             carets.nth(1).click()
             opcion_anio = page.get_by_test_id("DatePicker-container").get_by_text(str(anio), exact=True)
             if opcion_anio.count() > 0:
-                opcion_anio.first.click()
+                opcion_anio.last.click()
 
     # Seleccionar el botón del día sin importar qué día de la semana sea (ej. "Seleccione domingo, enero 25º")
     # Nota: En RegExp de JavaScript (Chromium), 'º' no es carácter de palabra (\w), por lo que no debe usarse \b tras 'º'.
